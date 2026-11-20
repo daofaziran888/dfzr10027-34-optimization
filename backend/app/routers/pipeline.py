@@ -5,6 +5,7 @@ from fastapi import APIRouter, Query
 
 from app.schemas import ActionResult
 from app.services.pipeline_orchestrator import (
+    deliver_metric_artifact,
     list_pipeline_results,
     run_all_pipelines,
     run_attribution_compare_pipeline,
@@ -33,9 +34,37 @@ def trigger_all() -> ActionResult:
 @router.post("/metric-agg", response_model=ActionResult)
 def trigger_metric_agg(
     metric_code: str | None = Query(default=None, description="指标编号，如 METR-GMV"),
+    version: str | None = Query(default=None, description="可选：按版本登记聚合产物，供服务发布就绪校验"),
 ) -> ActionResult:
-    result = run_metric_agg_pipeline(metric_code)
-    return ActionResult(ok=True, message="指标聚合管道已执行", entry=result)
+    result = run_metric_agg_pipeline(metric_code, version)
+    message = "指标聚合管道已执行"
+    if version:
+        message += f"，产物已按版本 {version} 登记"
+    return ActionResult(ok=True, message=message, entry=result)
+
+
+@router.post("/metric-artifact", response_model=ActionResult)
+def deliver_artifact(
+    metric_code: str = Query(description="指标编号，如 METR-GMV"),
+    version: str = Query(description="服务版本号，如 v2.0"),
+    payload: dict | None = None,
+    complete: bool | None = Query(default=None, description="管道是否已交付完整产物"),
+) -> ActionResult:
+    """显式投递某版本的聚合产物（含迟到/不完整场景），交由发布管理器校验。"""
+    from fastapi import HTTPException
+
+    from app.services.service_release import ServiceReleaseError, validate_artifact_payload
+    body = payload or {}
+    errors = validate_artifact_payload(body)
+    try:
+        artifact = deliver_metric_artifact(metric_code, version, body, complete=complete)
+    except ServiceReleaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if artifact["complete"]:
+        message = f"版本 {version} 聚合产物完整，已进入就绪台账"
+    else:
+        message = f"版本 {version} 聚合产物未就绪：{'、'.join(artifact['validation_errors'])}"
+    return ActionResult(ok=artifact["complete"], message=message, entry=artifact)
 
 
 @router.post("/forecast", response_model=ActionResult)

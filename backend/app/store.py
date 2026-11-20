@@ -51,6 +51,10 @@ store = Store()
 
 
 def reset_store() -> None:
-    """重新初始化全局 store，用于测试隔离。"""
-    global store
-    store = Store()
+    """重新初始化全局 store，用于测试隔离。
+
+    在单例上原地重建表数据而不是替换对象：各业务模块在导入期通过
+    ``from app.store import store`` 持有同一引用，原地初始化能保证
+    重置后所有模块看到的都是同一份最新数据。
+    """
+    store.__init__()

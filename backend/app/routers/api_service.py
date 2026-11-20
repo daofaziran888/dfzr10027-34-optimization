@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/api_service", tags=["数据服务"])
 service = ApiServiceService()
 
 LIST_FIELDS = ["接口编号", "查询数据集", "请求参数", "返回字段", "缓存秒数", "QPS上限", "认证方式", "版本号"]
-STATUSES = ["草稿", "已发布", "已下线", "已废弃"]
+STATUSES = ["草稿", "待发布", "已发布", "已下线", "已废弃"]
 
 
 def query_filters(request: Request) -> dict[str, str]:

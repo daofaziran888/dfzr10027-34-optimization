@@ -75,5 +75,24 @@ npm run dev
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
 
+## 数据服务版本化发布（发布就绪与数据快照）
+
+针对「发布登记状态与聚合产物就绪状态不一致、下线变化未反映到取数结果」的问题，
+数据服务的发布过程以聚合产物的完整性校验为准：
+
+- 聚合产物登记在 `_agg_artifacts`，服务版本登记在 `_service_versions`，
+  规则集中在 `app/services/service_release.py`，日报取数在 `app/services/daily_report.py`。
+- 版本提交发布（`POST /api/service_release/releases`）时先做产物就绪校验：
+  产物完整且同口径才固化为该版本的**已发布服务数据快照**并切换当前版本；
+  产物缺失/不完整时版本停在「待发布/待产物」，旧当前版本继续对外服务。
+- 产物迟到后通过 `POST /api/service_release/check-readiness` 由服务接口校验生效状态并切换，
+  切换后读取端（`GET /api/service_release/services/{code}/current`）只拿到当前版本快照。
+- 下线（`POST .../versions/{version}/offline`）只改版本登记：下线版本不再作为当前服务，
+  快照保留，按版本号查询（`GET .../versions/{version}`）时明确标注
+  「当前版本 / 历史版本 / 已下线版本」。
+- 已发布快照不可变：同版本产物后续重算不会覆盖快照，口径切换必须走新版本发布。
+- 日报（`POST /api/daily_report/run`）每轮先校验生效状态，再只用当前版本快照计算当轮指标，
+  并记录实际使用的服务版本；没有可读版本时本轮阻塞，不回退到未就绪产物。
+
 领域：数据工程
 子方向：数据分析与数据应用

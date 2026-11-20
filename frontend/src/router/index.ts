@@ -40,7 +40,10 @@ const router = createRouter({
     { path: '/data_extract', name: 'data_extract', component: DataExtract },
     { path: '/quality_mon', name: 'quality_mon', component: QualityMon },
     { path: '/compare_job', name: 'compare_job', component: CompareJob },
-    { path: '/api_service', name: 'api_service', component: ApiService },
+    // 注意：/api_service 与 Vite 的 /api 代理前缀冲突，深链会被转发到后端导致 404；
+    // 主路径改用 /data_service，并保留旧路径别名兼容既有书签。
+    { path: '/data_service', name: 'api_service', component: ApiService },
+    { path: '/api_service', redirect: '/data_service' },
     { path: '/schedule_plan', name: 'schedule_plan', component: SchedulePlan },
   ],
 })

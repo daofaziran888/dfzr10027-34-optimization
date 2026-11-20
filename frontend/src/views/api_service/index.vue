@@ -72,6 +72,75 @@
       </form>
     </div>
 
+    <section class="release-panel" data-testid="release-panel">
+      <header class="page-head">
+        <div>
+          <h3>服务版本发布与数据快照</h3>
+          <p class="page-desc">发布前校验聚合产物完整性，就绪后固化版本快照并切换当前版本；产物迟到期间旧版本继续提供同口径数据。</p>
+        </div>
+        <div class="page-actions">
+          <button class="btn" data-testid="release-refresh" type="button" @click="loadReleases">刷新发布状态</button>
+          <button class="btn primary" data-testid="check-readiness" type="button" @click="checkReadiness">校验生效状态</button>
+        </div>
+      </header>
+
+      <form class="filter-bar" data-testid="release-form" @submit.prevent="submitRelease">
+        <label class="filter-item">
+          <span>服务编号</span>
+          <input v-model="releaseForm.service_code" data-testid="release-service-code" placeholder="如 API-METRIC" required />
+        </label>
+        <label class="filter-item">
+          <span>版本号</span>
+          <input v-model="releaseForm.version" data-testid="release-version" placeholder="如 v2.0" required />
+        </label>
+        <label class="filter-item">
+          <span>指标编号</span>
+          <input v-model="releaseForm.metric_code" data-testid="release-metric-code" placeholder="如 METR-GMV" required />
+        </label>
+        <button class="btn primary" data-testid="submit-release" type="submit" :disabled="releasing">
+          {{ releasing ? '提交中…' : '提交发布' }}
+        </button>
+      </form>
+
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>服务编号</th>
+            <th>版本号</th>
+            <th>生命周期</th>
+            <th>产物就绪</th>
+            <th>访问身份</th>
+            <th>快照金额</th>
+            <th>待发布版本</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in releaseRows" :key="`${item.service_code}-${item.version}`"
+              :data-testid="`release-row-${item.version}`" :data-access="String(item.access)">
+            <td>{{ item.service_code }}</td>
+            <td>{{ item.version }}</td>
+            <td>{{ item.lifecycle }}</td>
+            <td>{{ item.readiness }}</td>
+            <td>{{ item.access }}</td>
+            <td>{{ item.snapshot?.value ?? '—' }}</td>
+            <td>{{ item.pending_versions?.join(',') || '—' }}</td>
+            <td class="row-actions">
+              <button class="link" type="button" :data-testid="`offline-${item.version}`"
+                      :disabled="item.lifecycle === '已下线'"
+                      @click="offlineVersion(item)">下线版本</button>
+            </td>
+          </tr>
+          <tr v-if="!releaseRows.length">
+            <td colspan="8" class="empty-state">暂无版本发布记录，提交一次发布后在此观察交接状态</td>
+          </tr>
+        </tbody>
+      </table>
+      <footer class="page-foot">
+        <span v-if="releaseMessage" class="error-text" data-testid="release-message">{{ releaseMessage }}</span>
+      </footer>
+    </section>
+
     <footer class="page-foot">
       <span>共 {{ total }} 条数据服务记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
@@ -184,5 +253,89 @@ async function reload() {
   }
 }
 
-onMounted(reload)
+type ReleaseRow = {
+  service_code: string
+  version: string
+  metric_code: string
+  lifecycle: string
+  readiness: string
+  is_current: boolean
+  access: string
+  snapshot: { value: number | null } | null
+  pending_versions: string[]
+}
+
+const releaseRows = ref<ReleaseRow[]>([])
+const releaseMessage = ref('')
+const releasing = ref(false)
+const releaseForm = ref({ service_code: 'API-METRIC', version: '', metric_code: 'METR-GMV' })
+
+async function loadReleases() {
+  releaseMessage.value = ''
+  try {
+    const response = await request('/api/service_release/releases')
+    if (!response.ok) throw new Error('版本发布状态读取失败')
+    const payload = await response.json()
+    releaseRows.value = payload.items ?? []
+  } catch (error) {
+    releaseMessage.value = error instanceof Error ? error.message : '版本发布状态读取失败'
+  }
+}
+
+async function submitRelease() {
+  releasing.value = true
+  releaseMessage.value = ''
+  try {
+    const response = await request('/api/service_release/releases', {
+      method: 'POST',
+      body: JSON.stringify(releaseForm.value),
+    })
+    const payload = await response.json()
+    if (!response.ok) throw new Error(payload.detail || '提交发布失败')
+    releaseMessage.value = payload.message
+    releaseForm.value.version = ''
+    await loadReleases()
+    await reload()
+  } catch (error) {
+    releaseMessage.value = error instanceof Error ? error.message : '提交发布失败'
+  } finally {
+    releasing.value = false
+  }
+}
+
+async function checkReadiness() {
+  releaseMessage.value = ''
+  try {
+    const response = await request('/api/service_release/check-readiness', { method: 'POST' })
+    const payload = await response.json()
+    if (!response.ok) throw new Error('生效状态校验失败')
+    releaseMessage.value = payload.message
+    await loadReleases()
+    await reload()
+  } catch (error) {
+    releaseMessage.value = error instanceof Error ? error.message : '生效状态校验失败'
+  }
+}
+
+async function offlineVersion(item: ReleaseRow) {
+  releaseMessage.value = ''
+  try {
+    const response = await request(
+      `/api/service_release/services/${encodeURIComponent(item.service_code)}/versions/${encodeURIComponent(item.version)}/offline`,
+      { method: 'POST' },
+    )
+    const payload = await response.json()
+    if (!response.ok) throw new Error(payload.detail || '下线失败')
+    releaseMessage.value = payload.message
+    await loadReleases()
+    await reload()
+  } catch (error) {
+    releaseMessage.value = error instanceof Error ? error.message : '下线失败'
+  }
+}
+
+onMounted(() => {
+  void reload()
+  void loadReleases()
+})
 </script>

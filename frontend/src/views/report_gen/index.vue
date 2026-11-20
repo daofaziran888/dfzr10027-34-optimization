@@ -72,6 +72,55 @@
       </form>
     </div>
 
+    <section class="release-panel" data-testid="daily-panel">
+      <header class="page-head">
+        <div>
+          <h3>日报指标取数（按实际可用服务版本）</h3>
+          <p class="page-desc">每轮日报先校验服务生效状态，再只读取当前版本的已发布快照；没有可读版本时本轮阻塞，不回退到未就绪产物。</p>
+        </div>
+        <div class="page-actions">
+          <button class="btn" data-testid="daily-refresh" type="button" @click="loadRounds">刷新轮次</button>
+          <button class="btn primary" data-testid="run-daily" type="button" @click="runDaily">计算当轮日报</button>
+        </div>
+      </header>
+      <form class="filter-bar" @submit.prevent="runDaily">
+        <label class="filter-item">
+          <span>数据服务编号</span>
+          <input v-model="dailyService" data-testid="daily-service-code" placeholder="如 API-METRIC" required />
+        </label>
+      </form>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>轮次</th>
+            <th>状态</th>
+            <th>实际使用版本</th>
+            <th>指标金额</th>
+            <th>本轮切换版本</th>
+            <th>待发布版本</th>
+            <th>生成时间</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in dailyRounds" :key="item.round_label" :data-testid="`daily-row-${item.round_label}`">
+            <td>{{ item.round_label }}</td>
+            <td>{{ item.status }}</td>
+            <td>{{ item.used_version ?? '—' }}</td>
+            <td>{{ item.metric_value ?? '—' }}</td>
+            <td>{{ item.promoted_versions?.join(',') || '—' }}</td>
+            <td>{{ item.waiting_versions?.join(',') || '—' }}</td>
+            <td>{{ item.generated_at }}</td>
+          </tr>
+          <tr v-if="!dailyRounds.length">
+            <td colspan="7" class="empty-state">暂无日报轮次，点击「计算当轮日报」开始</td>
+          </tr>
+        </tbody>
+      </table>
+      <footer class="page-foot">
+        <span v-if="dailyMessage" class="error-text" data-testid="daily-message">{{ dailyMessage }}</span>
+      </footer>
+    </section>
+
     <footer class="page-foot">
       <span>共 {{ total }} 条报表生成记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
@@ -184,5 +233,48 @@ async function reload() {
   }
 }
 
-onMounted(reload)
+type DailyRound = {
+  round_label: string
+  status: string
+  used_version: string | null
+  metric_value: number | null
+  promoted_versions: string[]
+  waiting_versions: string[]
+  generated_at: string
+}
+
+const dailyService = ref('API-METRIC')
+const dailyRounds = ref<DailyRound[]>([])
+const dailyMessage = ref('')
+
+async function loadRounds() {
+  dailyMessage.value = ''
+  try {
+    const response = await request('/api/daily_report/rounds')
+    if (!response.ok) throw new Error('日报轮次读取失败')
+    const payload = await response.json()
+    dailyRounds.value = payload.items ?? []
+  } catch (error) {
+    dailyMessage.value = error instanceof Error ? error.message : '日报轮次读取失败'
+  }
+}
+
+async function runDaily() {
+  dailyMessage.value = ''
+  try {
+    const query = new URLSearchParams({ service_code: dailyService.value }).toString()
+    const response = await request(`/api/daily_report/run?${query}`, { method: 'POST' })
+    const payload = await response.json()
+    if (!response.ok) throw new Error(payload.detail || '日报计算失败')
+    dailyMessage.value = payload.message
+    await loadRounds()
+  } catch (error) {
+    dailyMessage.value = error instanceof Error ? error.message : '日报计算失败'
+  }
+}
+
+onMounted(() => {
+  void reload()
+  void loadRounds()
+})
 </script>

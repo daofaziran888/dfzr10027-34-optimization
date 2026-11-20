@@ -65,8 +65,12 @@ def _to_int(val: Any) -> int:
 # Pipeline 1: metric_def -> agg_task -> api_service
 # ---------------------------------------------------------------------------
 
-def run_metric_agg_pipeline(metric_code: str | None = None) -> dict[str, Any]:
-    """读取指标定义与 fixtures 时序数据，按口径执行真实聚合，生成 API 产物。"""
+def run_metric_agg_pipeline(metric_code: str | None = None, version: str | None = None) -> dict[str, Any]:
+    """读取指标定义与 fixtures 时序数据，按口径执行真实聚合，生成 API 产物。
+
+    提供 ``version`` 时，管道同时把产物登记到发布管理器的聚合产物台账，
+    作为服务版本就绪校验的输入；未提供版本号时保持原有行为不变。
+    """
     # 取指标定义（优先 fixture，再回退 store）
     defs = METRIC_DEFS
     if metric_code is None:
@@ -115,7 +119,31 @@ def run_metric_agg_pipeline(metric_code: str | None = None) -> dict[str, Any]:
         "target_module": "api_service",
         "payload": result,
     })
+    if version:
+        # 聚合管道交付完整产物：进入服务版本就绪校验台账
+        from app.services.service_release import manager
+        manager.deliver_artifact(result["metric_code"], version, result, complete=True)
+        result["artifact_version"] = version
     return result
+
+
+# ---------------------------------------------------------------------------
+# 聚合产物显式交付：支持外部按版本投递完整或迟到的指标产物
+# ---------------------------------------------------------------------------
+
+def deliver_metric_artifact(
+    metric_code: str,
+    version: str,
+    payload: dict[str, Any],
+    *,
+    complete: bool | None = None,
+) -> dict[str, Any]:
+    """把聚合管道的指标产物按版本登记给发布管理器。
+
+    产物迟到或不完整时 ``complete=False``，发布管理器不会把它算作就绪。
+    """
+    from app.services.service_release import manager
+    return manager.deliver_artifact(metric_code, version, payload, complete=complete)
 
 
 # ---------------------------------------------------------------------------
